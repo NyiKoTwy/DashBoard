@@ -174,6 +174,11 @@ app.post("/login", async (req, res) => {
         res.status(500).send("Internal Server Error");
     }
 });
+// 🔥 Test Route
+app.get("/api/test", (req, res) => {
+    res.json({ message: "API is working!" });
+});
+
 
 // Start Server
 app.listen(port, () => {
