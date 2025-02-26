@@ -1,3 +1,5 @@
+const BASE_URL = "https://dashboard-cg29.onrender.com"; // ✅ Backend URL on Render
+
 function showLoadingSpinner(isLoading) {
     const spinner = document.getElementById("loading-spinner");
     spinner.style.display = isLoading ? "flex" : "none"; // Show when loading, hide when done
@@ -5,87 +7,85 @@ function showLoadingSpinner(isLoading) {
 
 document.addEventListener("DOMContentLoaded", function () {
     fetchInsights(); // Load insights when page loads
-document.querySelector("form[action='/upload']").addEventListener("submit", function (event) {
-    event.preventDefault();
-    showLoadingSpinner(true); // ✅ Show loading while uploading
 
-    let formData = new FormData(this);
+    document.querySelector("form[action='/upload']").addEventListener("submit", function (event) {
+        event.preventDefault();
+        showLoadingSpinner(true); // ✅ Show loading while uploading
 
-    fetch("/upload", {
-        method: "POST",
-        body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data && data.insights) {
-            fetchInsights(); // Refresh insights after upload
-            updateYearOptions(data.insights.date); // ✅ Update year dropdown dynamically
+        let formData = new FormData(this);
 
-            // ✅ Update insights title with just the year
-            let year = data.insights.date.split("-")[0]; // Extract year from date
-            document.getElementById("insights-title").textContent = `Insights for ${year}`;
-        }
-    })
-    .catch(error => console.error("Error uploading file:", error))
-    .finally(() => showLoadingSpinner(false)); // ✅ Hide spinner after upload
-});
-
-       function fetchInsights(selectedYear = null) {
-    showLoadingSpinner(true); // Show spinner before fetching data
-
-    fetch("/api/insights")
+        fetch(`${BASE_URL}/upload`, { // ✅ Updated to use full API URL
+            method: "POST",
+            body: formData
+        })
         .then(response => response.json())
-        .then(insights => {
-      console.log("Insights received:", insights);
+        .then(data => {
+            if (data && data.insights) {
+                fetchInsights(); // Refresh insights after upload
+                updateYearOptions(data.insights.date);
 
-            if (insights.date) {
-                document.getElementById("insights-section").style.display = "block";
-                
-                // ✅ Update the year dropdown dynamically
-                updateYearOptions(insights.date);
+                // ✅ Update insights title with just the year
+                let year = data.insights.date.split("-")[0]; // Extract year from date
+                document.getElementById("insights-title").textContent = `Insights for ${year}`;
+            }
+        })
+        .catch(error => console.error("Error uploading file:", error))
+        .finally(() => showLoadingSpinner(false)); // ✅ Hide spinner after upload
+    });
 
-                // ✅ Show insights for selected year (if available)
-                if (!selectedYear || insights.date.includes(selectedYear)) {
-                    drawCharts(insights);
-                    drawGuestBirthdays(insights.guestBirthdays, new Date().getMonth() + 1);
+    function fetchInsights(selectedYear = null) {
+        showLoadingSpinner(true); // Show spinner before fetching data
+
+        fetch(`${BASE_URL}/api/insights`) // ✅ Updated API call
+            .then(response => response.json())
+            .then(insights => {
+                console.log("Insights received:", insights);
+
+                if (insights.date) {
+                    document.getElementById("insights-section").style.display = "block";
+
+                    // ✅ Update the year dropdown dynamically
+                    updateYearOptions(insights.date);
+
+                    // ✅ Show insights for selected year (if available)
+                    if (!selectedYear || insights.date.includes(selectedYear)) {
+                        drawCharts(insights);
+                        drawGuestBirthdays(insights.guestBirthdays, new Date().getMonth() + 1);
+                    }
                 }
+            })
+            .catch(error => console.error("Error fetching insights:", error))
+            .finally(() => showLoadingSpinner(false)); // Hide spinner after fetching
+    }
+
+    document.getElementById("insights-form").addEventListener("submit", function (event) {
+        event.preventDefault();
+        showLoadingSpinner(true); // ✅ Show loading spinner
+
+        let selectedYear = document.getElementById("year").value;
+        let selectedMonth = document.getElementById("month").value;
+        let monthName = document.getElementById("month").options[document.getElementById("month").selectedIndex].text;
+
+        fetch(`${BASE_URL}/insights`, { // ✅ Updated API call
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ year: selectedYear, month: selectedMonth })
+        })
+        .then(response => response.json())
+        .then(data => {
+            console.log("Updated Insights:", data);
+
+            if (data && data.insights) {
+                drawCharts(data.insights); // ✅ Update charts
+                drawGuestBirthdays(data.insights.guestBirthdays, selectedMonth); // ✅ Update birthday list
+
+                // ✅ Update insights title with year & month
+                document.getElementById("insights-title").textContent = `Insights for ${monthName} ${selectedYear}`;
             }
         })
         .catch(error => console.error("Error fetching insights:", error))
-        .finally(() => showLoadingSpinner(false)); // Hide spinner after fetching
-}
-
-
-	    document.getElementById("insights-form").addEventListener("submit", function (event) {
-    event.preventDefault();
-    showLoadingSpinner(true); // ✅ Show loading spinner
-
-    let selectedYear = document.getElementById("year").value;
-    let selectedMonth = document.getElementById("month").value;
-    let monthName = document.getElementById("month").options[document.getElementById("month").selectedIndex].text;
-
-    fetch("/insights", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ year: selectedYear, month: selectedMonth })
-    })
-    .then(response => response.json())
-    .then(data => {
-        console.log("Updated Insights:", data);
-
-        if (data && data.insights) {
-            drawCharts(data.insights); // ✅ Update charts
-            drawGuestBirthdays(data.insights.guestBirthdays, selectedMonth); // ✅ Update birthday list
-
-            // ✅ Update insights title with year & month
-            document.getElementById("insights-title").textContent = `Insights for ${monthName} ${selectedYear}`;
-        }
-    })
-    .catch(error => console.error("Error fetching insights:", error))
-    .finally(() => showLoadingSpinner(false)); // ✅ Hide spinner after processing
-});
- 
-
+        .finally(() => showLoadingSpinner(false)); // ✅ Hide spinner after processing
+    });
 
     function updateYearOptions(dataYear) {
         const yearDropdown = document.getElementById("year");
@@ -201,38 +201,4 @@ document.querySelector("form[action='/upload']").addEventListener("submit", func
         });
     }
 });
-function drawGuestBirthdays(birthdays, selectedMonth) {
-    const birthdayTableBody = document.querySelector("#birthdayTable tbody");
-    
-    // Clear previous data
-    birthdayTableBody.innerHTML = "";
-
-    if (!birthdays || birthdays.length === 0) {
-        let row = `<tr><td colspan="2" class="no-data">No birthdays found for this month.</td></tr>`;
-        birthdayTableBody.innerHTML = row;
-        return;
-    }
-
-    // Filter birthdays for the selected month
-    let filteredBirthdays = birthdays.filter(b => {
-        let month = new Date(b.birthday).getMonth() + 1; // JS months are 0-based
-        return month == selectedMonth;
-    });
-
-    if (filteredBirthdays.length === 0) {
-        let row = `<tr><td colspan="2" class="no-data">No birthdays found for this month.</td></tr>`;
-        birthdayTableBody.innerHTML = row;
-        return;
-    }
-
-    // Populate table with guest names and formatted birthdates
-    filteredBirthdays.forEach(b => {
-        let formattedDate = new Date(b.birthday).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
-        let row = `<tr>
-            <td>${b.name || "Unknown"}</td>
-            <td>${formattedDate}</td>
-        </tr>`;
-        birthdayTableBody.innerHTML += row;
-    });
-}
 
