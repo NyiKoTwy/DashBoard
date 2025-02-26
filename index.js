@@ -1,4 +1,5 @@
 import express from "express";
+import cors from "cors";
 import axios from "axios";
 import fs from "fs";
 import multer from "multer";
@@ -9,7 +10,7 @@ import { fileURLToPath } from "url";
 
 dotenv.config();
 
-// Setup __dirname (necessary for ES module)
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -17,7 +18,13 @@ const app = express();
 const port = process.env.PORT || 3000;
 let insights = null;
 
-// PostgreSQL Database Setup
+
+app.use(cors({
+    origin: "https://dashboardwithnyikotwy.netlify.app", 
+    methods: "GET,POST"
+}));
+
+
 const db = new pg.Client({
     host: process.env.DB_HOST,
     user: process.env.DB_USER,
@@ -27,34 +34,31 @@ const db = new pg.Client({
     ssl: { rejectUnauthorized: false }
 });
 
-try {
-    db.connect();
-    console.log("Connected to the database");
-} catch (err) {
-    console.error("Error connecting to the database", err);
-}
+db.connect()
+    .then(() => console.log(" Connected to PostgreSQL Database"))
+    .catch(err => console.error(" Database Connection Error:", err));
 
-// Load API Key
-const api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=";
-const api_key = process.env.API_KEY;
 
-const header = { "Content-Type": "application/json" };
+const API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
+const API_KEY = process.env.API_KEY;
 
-// Ensure uploads directory exists
+const headers = { "Content-Type": "application/json" };
+
+
 if (!fs.existsSync("uploads")) {
     fs.mkdirSync("uploads");
 }
 
-// Multer Storage Setup
+
 const upload = multer({ dest: "uploads/" });
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-// Serve static files (HTML, CSS, JS)
+
 app.use(express.static(path.join(__dirname, "public")));
 
-// 🔥 Global Function for Generating Insights Prompt
+
 const generateInsightPrompt = (year, month, data = null) => {
     return {
         contents: [{
@@ -85,41 +89,40 @@ Return only raw JSON.
     };
 };
 
-// 🔹 Serve Login Page
+
 app.get("/", (req, res) => {
     res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-// 🔹 Serve Dashboard Page
+
 app.get("/dashboard", (req, res) => {
     res.sendFile(path.join(__dirname, "public", "dashboard.html"));
 });
 
-// 🔥 Upload Route (Processes File and Fetches Insights)
+
 app.post("/upload", upload.single("file"), async (req, res) => {
     if (!req.file) return res.status(400).json({ message: "No file uploaded" });
 
     try {
         const data = fs.readFileSync(req.file.path, "utf8");
-        fs.unlinkSync(req.file.path); // Delete file after reading
+        fs.unlinkSync(req.file.path); 
 
         const insightPrompt = generateInsightPrompt("2024", "02", data);
-        const response = await axios.post(api_url + api_key, insightPrompt, { headers: { "Content-Type": "application/json" } });
+        const response = await axios.post(`${API_URL}?key=${API_KEY}`, insightPrompt, { headers });
 
         let insightsText = response.data.candidates[0].content.parts[0].text;
         insights = JSON.parse(insightsText.replace(/```json|```/g, "").trim());
 
-        console.log("Insights Processed:", insights);
+        console.log(" Insights Processed:", insights);
         res.json({ message: "Processing completed!", insights });
 
     } catch (err) {
-        console.error("Error processing request:", err);
+        console.error(" Error processing request:", err);
         res.status(500).json({ message: "Error processing request." });
     }
 });
 
 
-// 🔥 API Route for Insights Data
 app.get("/api/insights", (req, res) => {
     if (insights) {
         res.json(insights);
@@ -128,30 +131,30 @@ app.get("/api/insights", (req, res) => {
     }
 });
 
-// 🔥 Fetch Insights for Given Month/Year
+
 app.post("/insights", async (req, res) => {
     const { year, month } = req.body;
 
     if (!year || !month) {
-        return res.status(400).send("Year and month are required.");
+        return res.status(400).json({ message: "Year and month are required." });
     }
 
     try {
         const insightPrompt = generateInsightPrompt(year, month);
-        const response = await axios.post(api_url + api_key, insightPrompt, { headers: header });
+        const response = await axios.post(`${API_URL}?key=${API_KEY}`, insightPrompt, { headers });
 
         let insightsText = response.data.candidates[0].content.parts[0].text;
-        insights = JSON.parse(insightsText.replace(/```json|```/g, "").trim()); // Update global insights
+        insights = JSON.parse(insightsText.replace(/```json|```/g, "").trim());
 
-        console.log(insights);
+        console.log(" Insights Updated:", insights);
         res.json({ message: "Insights updated!", insights });
     } catch (error) {
-        console.error("Error fetching insights:", error);
-        res.status(500).send("Error fetching insights.");
+        console.error(" Error fetching insights:", error);
+        res.status(500).json({ message: "Error fetching insights." });
     }
 });
 
-// 🔥 Login Route
+
 app.post("/login", async (req, res) => {
     const { username, password } = req.body;
 
@@ -159,29 +162,28 @@ app.post("/login", async (req, res) => {
         const result = await db.query("SELECT * FROM user_id WHERE name = $1", [username]);
 
         if (result.rows.length === 0) {
-            return res.redirect("/?message=User not found");
+            return res.status(401).json({ message: "User not found" });
         }
 
         const user = result.rows[0];
 
         if (user.password === password) {
-            res.redirect("/dashboard");
+            res.json({ message: "Login successful", redirect: "/dashboard" });
         } else {
-            res.redirect("/?message=Incorrect password or username");
+            res.status(401).json({ message: "Incorrect password or username" });
         }
     } catch (err) {
-        console.error("Error fetching password:", err);
-        res.status(500).send("Internal Server Error");
+        console.error(" Error fetching password:", err);
+        res.status(500).json({ message: "Internal Server Error" });
     }
 });
-// 🔥 Test Route
+
+
 app.get("/api/test", (req, res) => {
     res.json({ message: "API is working!" });
 });
 
 
-// Start Server
 app.listen(port, () => {
-    console.log(`Your server is running on port ${port}`);
+    console.log(` Server is running on port ${port}`);
 });
-
