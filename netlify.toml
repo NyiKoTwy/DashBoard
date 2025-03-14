@@ -5,7 +5,7 @@
 
 [[redirects]]
   from = "/api/*"
-  to = "https://dashboard-cg29.onrender.com/:splat"
+  to = "https://backend-dashboard-l0ta.onrender.com/:splat"
   status = 200
   force = true
 
