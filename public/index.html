@@ -72,7 +72,7 @@
                 })
                 .then(res => {
                     if (res.ok) {
-                        window.location.href = "/dashboard"; // Only redirect if authentication is valid
+                        window.location.href = "/dashboard.html"; // Only redirect if authentication is valid
                     } else {
                         console.error("Access denied. Authentication failed.");
                         const errorMessage = document.getElementById('error-message');
