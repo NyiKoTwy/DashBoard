@@ -7,21 +7,26 @@ import dotenv from "dotenv";
 import pg from "pg";
 import path from "path";
 import { fileURLToPath } from "url";
+import bcrypt from "bcrypt";
+import jwt from "jsonwebtoken";
+import cookieParser from "cookie-parser";
 
 dotenv.config();
 
-
+const JWT_SECRET = process.env.JWT_SECRET || "mySuperSecretKey123"; // Ensures consistent secret
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const port = process.env.PORT || 3000;
-let insights = null;
-
-
+// Store insights per user instead of globally
+const userInsights = new Map(); // Map user IDs to their insights data
+const isLocal = process.env.DB_HOST === "localhost";
+const isProduction = process.env.NODE_ENV === "production";
 app.use(cors({
-    origin: "https://dashboardwithnyikotwy.netlify.app", 
-    methods: "GET,POST"
+    origin: "https://dashboardwithnykotwy.netlify.app", //  Allow both local & deployed frontend
+    methods: "GET,POST",
+    credentials: true //  Allow cookies in cross-origin requests
 }));
 
 
@@ -31,7 +36,7 @@ const db = new pg.Client({
     password: process.env.DB_PASS,
     database: process.env.DB_NAME,
     port: process.env.DB_PORT,
-    ssl: { rejectUnauthorized: false }
+    ssl: isLocal ? false : { rejectUnauthorized: false }   
 });
 
 db.connect()
@@ -55,9 +60,49 @@ const upload = multer({ dest: "uploads/" });
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-
+app.use(cookieParser());
 app.use(express.static(path.join(__dirname, "public")));
+const validTokens = new Set(); //  Store active tokens in memory
 
+const generateToken = (user) => {
+    const access_token = jwt.sign({ username: user.name, id: user.id }, JWT_SECRET, { expiresIn: "1h" });  
+    validTokens.add(access_token); //  Track issued tokens
+    return access_token;
+};
+const validateToken = (req, res, next) => {
+    const access_token = req.cookies["access-token"];
+    console.log(access_token);
+    if (!access_token || !validTokens.has(access_token)) {
+        // Check if this is an AJAX request
+        if (req.xhr || req.headers.accept?.includes('application/json')) {
+            return res.status(401).json({ message: "Unauthorized" });
+        } else {
+            // For direct browser requests, redirect to login page
+            return res.redirect('/');
+        }
+    }
+    try {
+        const decoded = jwt.verify(access_token, JWT_SECRET);
+        if (decoded) {
+            req.authenticated = true;
+            req.userId = decoded.id; // Store the user ID for later use
+            return next();
+        }
+    } catch (err) {
+        // For direct browser requests, redirect to login page
+        if (req.xhr || req.headers.accept?.includes('application/json')) {
+            return res.status(401).json({ message: "Unauthorized" });
+        } else {
+            return res.redirect('/');
+        }
+    }
+};
+//  Invalidate all tokens when the server restarts
+const clearTokensOnRestart = () => {
+    validTokens.clear();
+    console.log(" All tokens invalidated due to server restart.");
+};
+clearTokensOnRestart();
 
 const generateInsightPrompt = (year, month, data = null) => {
     return {
@@ -95,12 +140,12 @@ app.get("/", (req, res) => {
 });
 
 
-app.get("/dashboard", (req, res) => {
+app.get("/dashboard", validateToken, (req, res) => {
     res.sendFile(path.join(__dirname, "public", "dashboard.html"));
 });
 
 
-app.post("/upload", upload.single("file"), async (req, res) => {
+app.post("/upload", validateToken, upload.single("file"), async (req, res) => {
     if (!req.file) return res.status(400).json({ message: "No file uploaded" });
 
     try {
@@ -111,9 +156,11 @@ app.post("/upload", upload.single("file"), async (req, res) => {
         const response = await axios.post(`${API_URL}?key=${API_KEY}`, insightPrompt, { headers });
 
         let insightsText = response.data.candidates[0].content.parts[0].text;
-        insights = JSON.parse(insightsText.replace(/```json|```/g, "").trim());
-
-        console.log(" Insights Processed:", insights);
+        const insights = JSON.parse(insightsText.replace(/```json|```/g, "").trim());
+        
+        // Store insights for this specific user
+        userInsights.set(req.userId, insights);
+        console.log(` Insights processed for user ${req.userId}:`, insights);
         res.json({ message: "Processing completed!", insights });
 
     } catch (err) {
@@ -123,7 +170,9 @@ app.post("/upload", upload.single("file"), async (req, res) => {
 });
 
 
-app.get("/api/insights", (req, res) => {
+app.get("/api/insights", validateToken, (req, res) => {
+    const insights = userInsights.get(req.userId);
+    
     if (insights) {
         res.json(insights);
     } else {
@@ -132,7 +181,7 @@ app.get("/api/insights", (req, res) => {
 });
 
 
-app.post("/insights", async (req, res) => {
+app.post("/insights", validateToken, async (req, res) => {
     const { year, month } = req.body;
 
     if (!year || !month) {
@@ -144,9 +193,12 @@ app.post("/insights", async (req, res) => {
         const response = await axios.post(`${API_URL}?key=${API_KEY}`, insightPrompt, { headers });
 
         let insightsText = response.data.candidates[0].content.parts[0].text;
-        insights = JSON.parse(insightsText.replace(/```json|```/g, "").trim());
+        const insights = JSON.parse(insightsText.replace(/```json|```/g, "").trim());
+        
+        // Store insights for this specific user
+        userInsights.set(req.userId, insights);
 
-        console.log(" Insights Updated:", insights);
+        console.log(` Insights updated for user ${req.userId}:`, insights);
         res.json({ message: "Insights updated!", insights });
     } catch (error) {
         console.error(" Error fetching insights:", error);
@@ -166,8 +218,15 @@ app.post("/login", async (req, res) => {
         }
 
         const user = result.rows[0];
-
+		console.log(user);
         if (user.password === password) {
+		    const token = generateToken(user);
+		    res.cookie("access-token", token, { 
+                maxAge: 900000, 
+                httpOnly: true, 
+                secure: isProduction, // Secure cookies only in production
+                sameSite: isProduction ? "None" : "Lax" 
+            });
             res.json({ message: "Login successful", redirect: "/dashboard" });
         } else {
             res.status(401).json({ message: "Incorrect password or username" });
