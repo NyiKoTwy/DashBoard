@@ -1,6 +1,4 @@
-const BASE_URL = window.location.hostname === "localhost"
-    ? "http://localhost:3000"  // Local backend
-    : "https://backend-dashboard-l0ta.onrender.com";  // Deployed backend
+const BASE_URL =  "https://backend-dashboard-l0ta.onrender.com";  // Deployed backend
 
 function showLoadingSpinner(isLoading) {
     const spinner = document.getElementById("loading-spinner");
